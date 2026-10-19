@@ -102,8 +102,8 @@ def get_full_weather_data(lat, lon):
     aqi_params = {"latitude": lat, "longitude": lon, "current": "us_aqi,pm2_5", "timezone": "auto"}
     
     try:
-        w_res = requests.get(weather_url, params=weather_params, timeout=10).json()
-        a_res = requests.get(aqi_url, params=aqi_params, timeout=10).json()
+        w_res = requests.get(weather_url, params=weather_params, timeout=15).json()
+        a_res = requests.get(aqi_url, params=aqi_params, timeout=15).json()
         return w_res, a_res
     except Exception as e:
         print(f"API Error: {e}")
@@ -208,20 +208,26 @@ async def fetch_and_send_weather(message_obj, location_name, lat, lon, is_callba
         
     w_data, a_data = get_full_weather_data(lat, lon)
     
-    if w_data and a_data:
-        message = format_weather_message(location_name, w_data, a_data)
-        chart_buf = create_rain_charts(w_data["hourly"], w_data["daily"], location_name)
-        
-        if is_callback:
-            await message_obj.edit_message_text(message, parse_mode="HTML")
-            await message_obj.message.reply_photo(photo=chart_buf, caption="📊 ក្រាបឱកាសភ្លៀង")
-        else:
-            await wait_msg.delete()
-            await message_obj.reply_text(message, parse_mode="HTML")
-            await message_obj.reply_photo(photo=chart_buf, caption="📊 ក្រាបឱកាសភ្លៀង")
+    # ការពារ Error ប្រសិនបើ API មិនឆ្លើយតប ឬទិន្នន័យមិនពេញលេញ
+    if w_data and a_data and "current" in w_data and "current" in a_data:
+        try:
+            message = format_weather_message(location_name, w_data, a_data)
+            chart_buf = create_rain_charts(w_data["hourly"], w_data["daily"], location_name)
+            
+            if is_callback:
+                await message_obj.edit_message_text(message, parse_mode="HTML")
+                await message_obj.message.reply_photo(photo=chart_buf, caption="📊 ក្រាបឱកាសភ្លៀង")
+            else:
+                await wait_msg.delete()
+                await message_obj.reply_text(message, parse_mode="HTML")
+                await message_obj.reply_photo(photo=chart_buf, caption="📊 ក្រាបឱកាសភ្លៀង")
+        except Exception as e:
+            if wait_msg: await wait_msg.delete()
+            print(f"Format Error: {e}")
+            await message_obj.reply_text("សូមទោស មានបញ្ហាក្នុងការបង្ហាញទិន្នន័យ។ សូមព្យាយាមម្តងទៀត។")
     else:
         if wait_msg: await wait_msg.delete()
-        await message_obj.reply_text("សូមទោស មានបញ្ហាក្នុងការទាញទិន្នន័យ។")
+        await message_obj.reply_text("សូមទោស មានបញ្ហាក្នុងការទាញទិន្នន័យពី API។ សូមព្យាយាមម្តងទៀតនៅពេលក្រោយ។")
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_subscriber(update.effective_chat.id)
@@ -254,20 +260,23 @@ async def daily_morning_alert(context: ContextTypes.DEFAULT_TYPE):
     if not subscribers: return
     
     w_data, a_data = get_full_weather_data(PHNOM_TOUCH_LAT, PHNOM_TOUCH_LON)
-    if w_data and a_data:
-        message = "🌅 <b>អាកាសធាតុព្រឹកនេះ៖</b>\n\n" + format_weather_message(PHNOM_TOUCH_NAME, w_data, a_data)
-        for chat_id in subscribers:
-            try:
-                await context.bot.send_message(chat_id=chat_id, text=message, parse_mode="HTML")
-            except Exception as e:
-                print(f"បរាជ័យក្នុងការផ្ញើទៅ {chat_id}: {e}")
+    if w_data and a_data and "current" in w_data:
+        try:
+            message = "🌅 <b>អាកាសធាតុព្រឹកនេះ៖</b>\n\n" + format_weather_message(PHNOM_TOUCH_NAME, w_data, a_data)
+            for chat_id in subscribers:
+                try:
+                    await context.bot.send_message(chat_id=chat_id, text=message, parse_mode="HTML")
+                except Exception as e:
+                    print(f"បរាជ័យក្នុងការផ្ញើទៅ {chat_id}: {e}")
+        except Exception as e:
+            print(f"Alert format error: {e}")
 
 async def check_rain_alert(context: ContextTypes.DEFAULT_TYPE):
     subscribers = get_subscribers()
     if not subscribers: return
     
     w_data, _ = get_full_weather_data(PHNOM_TOUCH_LAT, PHNOM_TOUCH_LON)
-    if not w_data: return
+    if not w_data or "hourly" not in w_data: return
     
     current_hour = dt.now().hour
     next_3_hours_rain = w_data["hourly"]["precipitation_probability"][current_hour:current_hour+3]
@@ -293,9 +302,12 @@ if __name__ == "__main__":
         cambodia_tz = datetime.timezone(datetime.timedelta(hours=7))
         job_queue.run_daily(daily_morning_alert, time=datetime.time(hour=6, minute=0, tzinfo=cambodia_tz))
         job_queue.run_repeating(check_rain_alert, interval=datetime.timedelta(hours=3), first=10)
+        print("✅ ប្រព័ន្ធជូនដំណឹងស្វ័យប្រវត្តិ ត្រូវបានបើក!")
+    else:
+        print("⚠️ មិនអាចបើកប្រព័ន្ធជូនដំណឹងបានទេ ព្រោះខ្វះ JobQueue។")
         
     # បើក Web Server នៅពេលខាងក្រោយ
-    threading.Thread(target=run_flask).start()
+    threading.Thread(target=run_flask, daemon=True).start()
     print("✅ Bot និង Web Server កំពុងដំណើរការ...")
     
     app.run_polling()
