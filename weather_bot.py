@@ -18,7 +18,7 @@ if not TOKEN or TOKEN == "YOUR_TOKEN_HERE":
     print("❌ បញ្ហា៖ សូមដាក់ Token ក្នុង file .env ជាមុនសិន!")
     exit()
 
-plt.rcParams['font.family'] = 'Leelawadee UI' 
+plt.rcParams['font.family'] = 'sans-serif' # ប្តូរទៅ sans-serif ដើម្បីកុំឱ្យ Render Error ពេលគ្មាន Font ខ្មែរ
 
 PHNOM_TOUCH_LAT = 13.4093
 PHNOM_TOUCH_LON = 103.0426
@@ -89,79 +89,101 @@ def get_aqi_desc(aqi):
     elif aqi <= 200: return "មិនល្អ (Unhealthy) 🔴"
     else: return "បង្គ្រប់គ្រោះ (Hazardous) 🟣"
 
+# បំបែកការទាញទិន្នន័យអាកាសធាតុ និង AQI ចេញពីគ្នា ដើម្បីកុំឱ្យមួយខូច ហើយប៉ះពាល់ដល់មួយទៀត
 def get_full_weather_data(lat, lon):
-    weather_url = "https://api.open-meteo.com/v1/forecast"
-    weather_params = {
-        "latitude": lat, "longitude": lon,
-        "current": "temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,weather_code",
-        "daily": "weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,precipitation_probability_max",
-        "hourly": "precipitation_probability", 
-        "timezone": "auto", "forecast_days": 3 
-    }
-    aqi_url = "https://air-quality-api.open-meteo.com/v1/air-quality"
-    aqi_params = {"latitude": lat, "longitude": lon, "current": "us_aqi,pm2_5", "timezone": "auto"}
+    w_data = None
+    a_data = None
     
+    # 1. ទាញទិន្នន័យអាកាសធាតុ
     try:
-        w_res = requests.get(weather_url, params=weather_params, timeout=15).json()
-        a_res = requests.get(aqi_url, params=aqi_params, timeout=15).json()
-        return w_res, a_res
+        weather_url = "https://api.open-meteo.com/v1/forecast"
+        weather_params = {
+            "latitude": lat, "longitude": lon,
+            "current": "temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,weather_code",
+            "daily": "weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,precipitation_probability_max",
+            "hourly": "precipitation_probability", 
+            "timezone": "auto", "forecast_days": 3 
+        }
+        w_res = requests.get(weather_url, params=weather_params, timeout=20)
+        w_data = w_res.json()
     except Exception as e:
-        print(f"API Error: {e}")
-        return None, None
+        print(f"Weather API Error: {e}")
+
+    # 2. ទាញទិន្នន័យគុណភាពខ្យល់
+    try:
+        aqi_url = "https://air-quality-api.open-meteo.com/v1/air-quality"
+        aqi_params = {"latitude": lat, "longitude": lon, "current": "us_aqi,pm2_5", "timezone": "auto"}
+        a_res = requests.get(aqi_url, params=aqi_params, timeout=20)
+        a_data = a_res.json()
+    except Exception as e:
+        print(f"AQI API Error: {e}")
+
+    return w_data, a_data
 
 def create_rain_charts(hourly_data, daily_data, location_name):
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-    today_str = dt.now().strftime("%Y-%m-%d")
-    start_time_str = f"{today_str}T00:00" 
-    
     try:
-        start_index = hourly_data["time"].index(start_time_str)
-    except ValueError:
-        start_index = 0 
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+        today_str = dt.now().strftime("%Y-%m-%d")
+        start_time_str = f"{today_str}T00:00" 
         
-    times = hourly_data["time"][start_index:start_index+24]
-    rain_prob = hourly_data["precipitation_probability"][start_index:start_index+24]
-    hours_labels = [dt.strptime(t, "%Y-%m-%dT%H:%M").strftime("%H:00") for t in times]
-    
-    bars = ax1.bar(hours_labels, rain_prob, color='skyblue', edgecolor='blue')
-    for bar, prob in zip(bars, rain_prob):
-        if prob >= 50: bar.set_color('dodgerblue')
+        try:
+            start_index = hourly_data["time"].index(start_time_str)
+        except ValueError:
+            start_index = 0 
             
-    ax1.set_title(f"1. ឱកាសភ្លៀង 24 ម៉ោង (00:00 ដល់ 23:00) - {location_name}", fontsize=14, fontweight='bold')
-    ax1.set_ylabel("ឱកាសភ្លៀង (%)", fontsize=12)
-    ax1.tick_params(axis='x', rotation=45, labelsize=9)
-    for label in ax1.get_xticklabels(): label.set_horizontalalignment('right')
-    ax1.set_ylim(0, 100)
-    ax1.grid(axis='y', linestyle='--', alpha=0.7)
-
-    daily_times = daily_data["time"]
-    daily_rain = daily_data["precipitation_probability_max"]
-    daily_labels = [dt.strptime(t, "%Y-%m-%d").strftime("%d/%m") for t in daily_times]
+        times = hourly_data["time"][start_index:start_index+24]
+        rain_prob = hourly_data["precipitation_probability"][start_index:start_index+24]
+        hours_labels = [dt.strptime(t, "%Y-%m-%dT%H:%M").strftime("%H:00") for t in times]
         
-    bars2 = ax2.bar(daily_labels, daily_rain, color='lightgreen', edgecolor='green', width=0.4)
-    for bar, prob in zip(bars2, daily_rain):
-        if prob >= 50: bar.set_color('forestgreen')
-        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1, f'{prob}%', ha='center', va='bottom', fontsize=10)
+        bars = ax1.bar(hours_labels, rain_prob, color='skyblue', edgecolor='blue')
+        for bar, prob in zip(bars, rain_prob):
+            if prob >= 50: bar.set_color('dodgerblue')
+                
+        ax1.set_title(f"1. ឱកាសភ្លៀង 24 ម៉ោង (00:00 ដល់ 23:00) - {location_name}", fontsize=14, fontweight='bold')
+        ax1.set_ylabel("ឱកាសភ្លៀង (%)", fontsize=12)
+        ax1.tick_params(axis='x', rotation=45, labelsize=9)
+        for label in ax1.get_xticklabels(): label.set_horizontalalignment('right')
+        ax1.set_ylim(0, 100)
+        ax1.grid(axis='y', linestyle='--', alpha=0.7)
 
-    ax2.set_title(f"2. ឱកាសភ្លៀងខ្ពស់បំផុតប្រចាំថ្ងៃ (%) - {location_name}", fontsize=14, fontweight='bold')
-    ax2.set_xlabel("ថ្ងៃ/ខែ", fontsize=12)
-    ax2.set_ylabel("ឱកាសភ្លៀង (%)", fontsize=12)
-    ax2.set_ylim(0, 110) 
-    ax2.grid(axis='y', linestyle='--', alpha=0.7)
+        daily_times = daily_data["time"]
+        daily_rain = daily_data["precipitation_probability_max"]
+        daily_labels = [dt.strptime(t, "%Y-%m-%d").strftime("%d/%m") for t in daily_times]
+            
+        bars2 = ax2.bar(daily_labels, daily_rain, color='lightgreen', edgecolor='green', width=0.4)
+        for bar, prob in zip(bars2, daily_rain):
+            if prob >= 50: bar.set_color('forestgreen')
+            ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1, f'{prob}%', ha='center', va='bottom', fontsize=10)
 
-    plt.tight_layout()
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png', dpi=100)
-    buf.seek(0)
-    plt.close()
-    return buf
+        ax2.set_title(f"2. ឱកាសភ្លៀងខ្ពស់បំផុតប្រចាំថ្ងៃ (%) - {location_name}", fontsize=14, fontweight='bold')
+        ax2.set_xlabel("ថ្ងៃ/ខែ", fontsize=12)
+        ax2.set_ylabel("ឱកាសភ្លៀង (%)", fontsize=12)
+        ax2.set_ylim(0, 110) 
+        ax2.grid(axis='y', linestyle='--', alpha=0.7)
+
+        plt.tight_layout()
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=100)
+        buf.seek(0)
+        plt.close()
+        return buf
+    except Exception as e:
+        print(f"Chart generation error: {e}")
+        plt.close()
+        return None
 
 def format_weather_message(location_name, w_data, a_data):
     current = w_data["current"]
     daily = w_data["daily"]
-    aqi = a_data["current"]["us_aqi"]
-    pm25 = a_data["current"]["pm2_5"]
-    uv = daily["uv_index_max"][0]
+    
+    aqi_text = "គ្មានទិន្នន័យ"
+    if a_data and "current" in a_data:
+        aqi = a_data["current"].get("us_aqi")
+        pm25 = a_data["current"].get("pm2_5")
+        if aqi is not None and pm25 is not None:
+            aqi_text = f"{aqi} - {get_aqi_desc(aqi)} (PM2.5: {pm25})"
+            
+    uv = daily.get("uv_index_max", ["គ្មាន"])[0]
     sunrise = dt.strptime(daily["sunrise"][0], "%Y-%m-%dT%H:%M").strftime("%H:%M")
     sunset = dt.strptime(daily["sunset"][0], "%Y-%m-%dT%H:%M").strftime("%H:%M")
 
@@ -173,7 +195,7 @@ def format_weather_message(location_name, w_data, a_data):
         f"📝 ស្ថានភាព៖ {get_weather_desc(current['weather_code'])}\n"
         f"☀️ សន្ទស្សន៍ UV៖ {uv} (កម្រិតខ្ពស់បំផុតថ្ងៃនេះ)\n"
         f"🌅 ថ្ងៃរះ៖ {sunrise} | ថ្ងៃលិច៖ {sunset}\n"
-        f"🌫️ គុណភាពខ្យល់ (AQI)៖ {aqi} - {get_aqi_desc(aqi)} (PM2.5: {pm25})\n\n"
+        f"🌫️ គុណភាពខ្យល់ (AQI)៖ {aqi_text}\n\n"
         f"📅 <b>ព្យាករណ៍ ២ ថ្ងៃខាងមុខ៖</b>\n"
     )
     for i in range(1, 3):
@@ -208,26 +230,28 @@ async def fetch_and_send_weather(message_obj, location_name, lat, lon, is_callba
         
     w_data, a_data = get_full_weather_data(lat, lon)
     
-    # ការពារ Error ប្រសិនបើ API មិនឆ្លើយតប ឬទិន្នន័យមិនពេញលេញ
-    if w_data and a_data and "current" in w_data and "current" in a_data:
+    # ពិនិត្យមើលថាតើទិន្នន័យអាកាសធាតុមានឬអត់
+    if w_data and "current" in w_data:
         try:
             message = format_weather_message(location_name, w_data, a_data)
-            chart_buf = create_rain_charts(w_data["hourly"], w_data["daily"], location_name)
+            chart_buf = create_rain_charts(w_data.get("hourly", {}), w_data.get("daily", {}), location_name)
             
             if is_callback:
                 await message_obj.edit_message_text(message, parse_mode="HTML")
-                await message_obj.message.reply_photo(photo=chart_buf, caption="📊 ក្រាបឱកាសភ្លៀង")
+                if chart_buf:
+                    await message_obj.message.reply_photo(photo=chart_buf, caption="📊 ក្រាបឱកាសភ្លៀង")
             else:
-                await wait_msg.delete()
+                if wait_msg: await wait_msg.delete()
                 await message_obj.reply_text(message, parse_mode="HTML")
-                await message_obj.reply_photo(photo=chart_buf, caption="📊 ក្រាបឱកាសភ្លៀង")
+                if chart_buf:
+                    await message_obj.reply_photo(photo=chart_buf, caption="📊 ក្រាបឱកាសភ្លៀង")
         except Exception as e:
             if wait_msg: await wait_msg.delete()
-            print(f"Format Error: {e}")
+            print(f"Display Error: {e}")
             await message_obj.reply_text("សូមទោស មានបញ្ហាក្នុងការបង្ហាញទិន្នន័យ។ សូមព្យាយាមម្តងទៀត។")
     else:
         if wait_msg: await wait_msg.delete()
-        await message_obj.reply_text("សូមទោស មានបញ្ហាក្នុងការទាញទិន្នន័យពី API។ សូមព្យាយាមម្តងទៀតនៅពេលក្រោយ។")
+        await message_obj.reply_text("សូមទោស ម៉ាស៊ីនមេ API កំពុងមមាញឹកពេក។ សូមព្យាយាមម្តងទៀតនៅពេលក្រោយ។")
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_subscriber(update.effective_chat.id)
@@ -260,7 +284,7 @@ async def daily_morning_alert(context: ContextTypes.DEFAULT_TYPE):
     if not subscribers: return
     
     w_data, a_data = get_full_weather_data(PHNOM_TOUCH_LAT, PHNOM_TOUCH_LON)
-    if w_data and a_data and "current" in w_data:
+    if w_data and "current" in w_data:
         try:
             message = "🌅 <b>អាកាសធាតុព្រឹកនេះ៖</b>\n\n" + format_weather_message(PHNOM_TOUCH_NAME, w_data, a_data)
             for chat_id in subscribers:
@@ -306,7 +330,6 @@ if __name__ == "__main__":
     else:
         print("⚠️ មិនអាចបើកប្រព័ន្ធជូនដំណឹងបានទេ ព្រោះខ្វះ JobQueue។")
         
-    # បើក Web Server នៅពេលខាងក្រោយ
     threading.Thread(target=run_flask, daemon=True).start()
     print("✅ Bot និង Web Server កំពុងដំណើរការ...")
     
