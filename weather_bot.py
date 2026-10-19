@@ -2,8 +2,10 @@ import os
 import io
 import requests
 import datetime
+import threading
 from datetime import datetime as dt
 import matplotlib.pyplot as plt
+from flask import Flask
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -40,7 +42,18 @@ PHNOM_PENH_KHANS = {
     "ខណ្ឌកំបូល": (11.5200, 104.7500)
 }
 
-# ប្រព័ន្ធគ្រប់គ្រងអ្នកទទួលសារ
+# ================= ប្រព័ន្ធ Web Server សម្រាប់ Render =================
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def home():
+    return "Bot is running!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    flask_app.run(host='0.0.0.0', port=port)
+
+# ================= ប្រព័ន្ធគ្រប់គ្រងអ្នកទទួលសារ =================
 def save_subscriber(chat_id):
     chat_id = str(chat_id)
     if not os.path.exists(SUBSCRIBERS_FILE):
@@ -236,7 +249,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"⏳ កំពុងទាញយកទិន្នន័យនៅ {khan_name}...")
         await fetch_and_send_weather(query, khan_name, lat, lon, is_callback=True)
 
-# មុខងារជូនដំណឹងស្វ័យប្រវត្តិ
 async def daily_morning_alert(context: ContextTypes.DEFAULT_TYPE):
     subscribers = get_subscribers()
     if not subscribers: return
@@ -279,16 +291,11 @@ if __name__ == "__main__":
     job_queue = app.job_queue
     if job_queue:
         cambodia_tz = datetime.timezone(datetime.timedelta(hours=7))
-        
-        # ជូនដំណឹងអាកាសធាតុព្រឹក រៀងរាល់ម៉ោង 06:00 ព្រឹក
         job_queue.run_daily(daily_morning_alert, time=datetime.time(hour=6, minute=0, tzinfo=cambodia_tz))
-        
-        # ពិនិត្យភ្លៀងរៀងរាល់ 3 ម៉ោងម្តង
         job_queue.run_repeating(check_rain_alert, interval=datetime.timedelta(hours=3), first=10)
         
-        print("✅ ប្រព័ន្ធជូនដំណឹងស្វ័យប្រវត្តិ ត្រូវបានបើក!")
-
-    print("✅ Bot កំពុងដំណើរការ...")
-    print("សូមចូលទៅ Telegram រួចវាយ /start ដើម្បីឱ្យ Bot ចងចាំអ្នក!")
+    # បើក Web Server នៅពេលខាងក្រោយ
+    threading.Thread(target=run_flask).start()
+    print("✅ Bot និង Web Server កំពុងដំណើរការ...")
     
     app.run_polling()
